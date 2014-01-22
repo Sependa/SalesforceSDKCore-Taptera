@@ -9,7 +9,7 @@ Pod::Spec.new do |s|
   s.platform  = :ios, '6.0'
 
   s.requires_arc = true
-  s.source_files = "SalesforceNetworkSDK/*.{h,m}"
+  s.source_files = "SalesforceSDKCore/**/*.{h,m, c}"
 
   s.header_dir = 'SalesforceNetworkSDK'
 
@@ -17,6 +17,9 @@ Pod::Spec.new do |s|
   s.dependency 'SalesforceOAuth-Taptera'
   s.dependency 'FMDB'
 
-  s.prefix_header_file = 'SalesforceNetworkSDK/SalesforceNetworkSDK-Prefix.pch'
+  s.private_header_files = "External/openssl/openssl/*.h"
+
+  s.vendored_libraries = 'External/openssl/*.a', 'External/sqlcipher/libJavaScriptCore.a'
+  s.prefix_header_file = 'SalesforceSDKCore/SalesforceSDKCore-Prefix.pch'
 
 end
