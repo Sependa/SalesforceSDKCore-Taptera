@@ -11,7 +11,7 @@ Pod::Spec.new do |s|
   s.requires_arc = true
   s.source_files = "SalesforceSDKCore/**/*.{h,m, c}"
 
-  s.header_dir = 'SalesforceNetworkSDK'
+  s.header_dir = 'SalesforceSDKCore'
 
   s.dependency 'Salesforce-Common-Utils-iOS-Taptera'
   s.dependency 'SalesforceOAuth-Taptera'
