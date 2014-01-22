@@ -14,6 +14,7 @@ Pod::Spec.new do |s|
   s.header_dir = 'SalesforceNetworkSDK'
 
   s.dependency 'Salesforce-Common-Utils-iOS-Taptera'
+  s.dependency 'SalesforceOAuth-Taptera'
   s.dependency 'FMDB'
 
   s.prefix_header_file = 'SalesforceNetworkSDK/SalesforceNetworkSDK-Prefix.pch'

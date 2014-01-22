@@ -5,13 +5,17 @@ PODS:
   - FMDB/standard (2.2):
     - FMDB/common
   - Salesforce-Common-Utils-iOS-Taptera (1.0)
+  - SalesforceOAuth-Taptera (1.0):
+    - Salesforce-Common-Utils-iOS-Taptera
 
 DEPENDENCIES:
   - FMDB
   - Salesforce-Common-Utils-iOS-Taptera
+  - SalesforceOAuth-Taptera
 
 SPEC CHECKSUMS:
   FMDB: 97472cfacf0d9e445e915704fb43b4b142799c36
   Salesforce-Common-Utils-iOS-Taptera: 6154d0561d98aa8a89befb7e54e4599ee50d773e
+  SalesforceOAuth-Taptera: b683cd451a2140eb979acfcc8d4185b0abc3ee93
 
 COCOAPODS: 0.28.0
