@@ -1,10 +1,17 @@
 PODS:
+  - CocoaLumberjack (1.6.4):
+    - CocoaLumberjack/Core
+    - CocoaLumberjack/Extensions
+  - CocoaLumberjack/Core (1.6.4)
+  - CocoaLumberjack/Extensions (1.6.4):
+    - CocoaLumberjack/Core
   - FMDB (2.2):
     - FMDB/standard
   - FMDB/common (2.2)
   - FMDB/standard (2.2):
     - FMDB/common
-  - Salesforce-Common-Utils-iOS-Taptera (1.0)
+  - Salesforce-Common-Utils-iOS-Taptera (1.0):
+    - CocoaLumberjack (= 1.6.4)
   - SalesforceOAuth-Taptera (1.0):
     - Salesforce-Common-Utils-iOS-Taptera
 
@@ -14,8 +21,9 @@ DEPENDENCIES:
   - SalesforceOAuth-Taptera
 
 SPEC CHECKSUMS:
+  CocoaLumberjack: a41a6cce03be251319e1ace1fdac5a610ce10467
   FMDB: 97472cfacf0d9e445e915704fb43b4b142799c36
-  Salesforce-Common-Utils-iOS-Taptera: 6154d0561d98aa8a89befb7e54e4599ee50d773e
+  Salesforce-Common-Utils-iOS-Taptera: 34c3888669185a3375f493655b2946f86f87bc48
   SalesforceOAuth-Taptera: b683cd451a2140eb979acfcc8d4185b0abc3ee93
 
 COCOAPODS: 0.28.0
