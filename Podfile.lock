@@ -23,7 +23,7 @@ DEPENDENCIES:
 SPEC CHECKSUMS:
   CocoaLumberjack: a41a6cce03be251319e1ace1fdac5a610ce10467
   FMDB: 97472cfacf0d9e445e915704fb43b4b142799c36
-  Salesforce-Common-Utils-iOS-Taptera: 34c3888669185a3375f493655b2946f86f87bc48
+  Salesforce-Common-Utils-iOS-Taptera: 8cfb08f3e5a63864522c550423d97c338f766530
   SalesforceOAuth-Taptera: b683cd451a2140eb979acfcc8d4185b0abc3ee93
 
 COCOAPODS: 0.28.0
