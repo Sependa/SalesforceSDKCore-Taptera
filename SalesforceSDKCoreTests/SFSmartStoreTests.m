@@ -26,16 +26,23 @@
 #import "SFJsonUtils.h"
 #import "FMDatabase.h"
 #import "FMDatabaseAdditions.h"
+#import "FMDatabaseQueue.h"
 #import "SFQuerySpec.h"
 #import "SFStoreCursor.h"
 #import "SFSmartStoreDatabaseManager.h"
 #import "SFSmartStore.h"
 #import "SFSmartStore+Internal.h"
-#import "SFPasscodeManager.h"
-#import "SFPasscodeManager+Internal.h"
-#import "SFPasscodeProviderManager.h"
-#import "SFSecurityLockout.h"
+#import "SFAlterSoupLongOperation.h"
+#import "SFSoupIndex.h"
+#import "SFSmartStoreUpgrade.h"
+#import "SFSmartStoreUpgrade+Internal.h"
+#import <SalesforceSecurity/SFPasscodeManager.h>
+#import <SalesforceSecurity/SFPasscodeManager+Internal.h>
+#import <SalesforceSecurity/SFPasscodeProviderManager.h>
 #import "SFSecurityLockout+Internal.h"
+#import "SFUserAccountManager.h"
+#import <SalesforceSecurity/SFKeyStoreManager.h>
+#import <SalesforceSecurity/SFEncryptionKey.h>
 #import <SalesforceCommonUtils/NSString+SFAdditions.h>
 #import <SalesforceCommonUtils/NSData+SFAdditions.h>
 
@@ -50,7 +57,6 @@ NSString * const kTestSoupName   = @"testSoup";
 - (int)rowCountForTable:(NSString *)tableName db:(FMDatabase *)db;
 - (BOOL)tableNameInMaster:(NSString *)tableName db:(FMDatabase *)db;
 - (BOOL)canReadDatabase:(FMDatabase *)db;
-- (NSArray *)variedStores:(NSString *)passcode;
 - (void)clearAllStores;
 @end
 
@@ -95,7 +101,7 @@ NSString * const kTestSoupName   = @"testSoup";
     
     // Top-level elements
     [self assertSameJSONWithExpected:@"va" actual:[SFJsonUtils projectIntoJson:json path:@"a"] message:@"Wrong value for key a"];
-    [self assertSameJSONWithExpected:[NSNumber numberWithInt:2]  actual:[SFJsonUtils projectIntoJson:json path:@"b"] message:@"Wrong value for key b"];
+    [self assertSameJSONWithExpected:@2 actual:[SFJsonUtils projectIntoJson:json path:@"b"] message:@"Wrong value for key b"];
     [self assertSameJSONWithExpected:[SFJsonUtils objectFromJSONString:@"[0,1,2]"] actual:[SFJsonUtils projectIntoJson:json path:@"c"] message:@"Wrong value for key c"];
     [self assertSameJSONWithExpected:[SFJsonUtils objectFromJSONString:@"{\"d1\":\"vd1\", \"d2\":\"vd2\", \"d3\":[1,2], \"d4\":{\"e\":5}}"] actual:[SFJsonUtils projectIntoJson:json path:@"d"] message:@"Wrong value for key d"];
 }
@@ -113,7 +119,7 @@ NSString * const kTestSoupName   = @"testSoup";
     [self assertSameJSONWithExpected:@"vd2" actual:[SFJsonUtils projectIntoJson:json path:@"d.d2"] message:@"Wrong value for key d.d2"];    
     [self assertSameJSONWithExpected:[SFJsonUtils objectFromJSONString:@"[1,2]"] actual:[SFJsonUtils projectIntoJson:json path:@"d.d3"] message:@"Wrong value for key d.d3"];    
     [self assertSameJSONWithExpected:[SFJsonUtils objectFromJSONString:@"{\"e\":5}"] actual:[SFJsonUtils projectIntoJson:json path:@"d.d4"] message:@"Wrong value for key d.d4"];        
-    [self assertSameJSONWithExpected:[NSNumber numberWithInt:5] actual:[SFJsonUtils projectIntoJson:json path:@"d.d4.e"] message:@"Wrong value for key d.d4.e"];    
+    [self assertSameJSONWithExpected:@5 actual:[SFJsonUtils projectIntoJson:json path:@"d.d4.e"] message:@"Wrong value for key d.d4.e"];    
 }
 
 /**
@@ -136,8 +142,8 @@ NSString * const kTestSoupName   = @"testSoup";
     STAssertFalse([_store soupExists:kTestSoupName], @"Soup %@ should not exist", kTestSoupName);
     
     // Register
-    NSDictionary* soupIndex = [NSDictionary dictionaryWithObjectsAndKeys:@"name",@"path",@"string",@"type",nil];
-    [_store registerSoup:kTestSoupName withIndexSpecs:[NSArray arrayWithObjects:soupIndex, nil]];
+    NSDictionary* soupIndex = @{@"path": @"name",@"type": @"string"};
+    [_store registerSoup:kTestSoupName withIndexSpecs:[SFSoupIndex asArraySoupIndexes:@[soupIndex]]];
     BOOL testSoupExists = [_store soupExists:kTestSoupName];
     STAssertTrue(testSoupExists, @"Soup %@ should exist", kTestSoupName);
     
@@ -158,37 +164,37 @@ NSString * const kTestSoupName   = @"testSoup";
     STAssertFalse(testSoupExists, @"Soup %@ should not exist", kTestSoupName);
     
     // Register first time.
-    NSDictionary* soupIndex = [NSDictionary dictionaryWithObjectsAndKeys:@"name",@"path",@"string",@"type",nil];
-    [_store registerSoup:kTestSoupName withIndexSpecs:[NSArray arrayWithObjects:soupIndex, nil]];
+    NSDictionary* soupIndex = @{@"path": @"name",@"type": @"string"};
+    [_store registerSoup:kTestSoupName withIndexSpecs:[SFSoupIndex asArraySoupIndexes:@[soupIndex]]];
     testSoupExists = [_store soupExists:kTestSoupName];
     STAssertTrue(testSoupExists, @"Soup %@ should exist", kTestSoupName);
     
     // Register second time.  Should only create one soup per unique soup name.
-    [_store registerSoup:kTestSoupName withIndexSpecs:[NSArray arrayWithObjects:soupIndex, nil]];
-    int rowCount = [_store.storeDb intForQuery:@"SELECT COUNT(*) FROM soup_names WHERE soupName = ?", kTestSoupName];
+    [_store registerSoup:kTestSoupName withIndexSpecs:[SFSoupIndex asArraySoupIndexes:@[soupIndex]]];
+    __block int rowCount;
+    [_store.storeQueue inDatabase:^(FMDatabase* db) {
+        rowCount = [db intForQuery:@"SELECT COUNT(*) FROM soup_names WHERE soupName = ?", kTestSoupName];
+    }];
     STAssertEquals(rowCount, 1, @"Soup names should be unique within a store.");
     
     // Remove
     [_store removeSoup:kTestSoupName];
     testSoupExists = [_store soupExists:kTestSoupName];
     STAssertFalse(testSoupExists, @"Soup %@ should no longer exist", kTestSoupName);
-    
 }
 
 - (void)testQuerySpecPageSize
 {
-    NSDictionary *allQueryNoPageSize = [NSDictionary dictionaryWithObjectsAndKeys:kQuerySpecTypeRange, kQuerySpecParamQueryType,
-                              @"a/path", kQuerySpecParamIndexPath,
-                              nil];
+    NSDictionary *allQueryNoPageSize = @{kQuerySpecParamQueryType: kQuerySpecTypeRange,
+                              kQuerySpecParamIndexPath: @"a"};
     
     SFQuerySpec *querySpec = [[SFQuerySpec alloc] initWithDictionary:allQueryNoPageSize withSoupName:kTestSoupName];
     NSUInteger querySpecPageSize = querySpec.pageSize;
     STAssertEquals(querySpecPageSize, kQuerySpecDefaultPageSize, @"Page size value should be default, if not specified.");
-    uint expectedPageSize = 42;
-    NSDictionary *allQueryWithPageSize = [NSDictionary dictionaryWithObjectsAndKeys:kQuerySpecTypeRange, kQuerySpecParamQueryType,
-                                        @"a/path", kQuerySpecParamIndexPath,
-                                          [NSNumber numberWithInt:expectedPageSize], kQuerySpecParamPageSize,
-                                        nil];
+    NSUInteger expectedPageSize = 42;
+    NSDictionary *allQueryWithPageSize = @{kQuerySpecParamQueryType: kQuerySpecTypeRange,
+                                        kQuerySpecParamIndexPath: @"a",
+                                          kQuerySpecParamPageSize: @(expectedPageSize)};
     querySpec = [[SFQuerySpec alloc] initWithDictionary:allQueryWithPageSize withSoupName:kTestSoupName];
     querySpecPageSize = querySpec.pageSize;
     STAssertEquals(querySpecPageSize, expectedPageSize, @"Page size value should reflect input value.");
@@ -201,24 +207,24 @@ NSString * const kTestSoupName   = @"testSoup";
     // Entries divided evenly by the page size.
     uint evenDividePageSize = 25;
     int expectedPageSize = totalEntries / evenDividePageSize;
-    NSDictionary *allQuery = [NSDictionary dictionaryWithObjectsAndKeys:kQuerySpecTypeRange, kQuerySpecParamQueryType,
-                                          @"a/path", kQuerySpecParamIndexPath,
-                                          [NSNumber numberWithInt:evenDividePageSize], kQuerySpecParamPageSize,
-                                          nil];
-    SFQuerySpec *querySpec = [[SFQuerySpec alloc] initWithDictionary:allQuery  withSoupName:@"test"];
-    SFStoreCursor *cursor = [[SFStoreCursor alloc] initWithStore:nil querySpec:querySpec totalEntries:totalEntries];
+    NSDictionary *allQuery = @{kQuerySpecParamQueryType: kQuerySpecTypeRange,
+                                          kQuerySpecParamIndexPath: @"a",
+                                          kQuerySpecParamPageSize: [NSNumber numberWithInt:evenDividePageSize]};
+    SFQuerySpec *querySpec = [[SFQuerySpec alloc] initWithDictionary:allQuery  withSoupName:kTestSoupName];
+    SFStoreCursor *cursor = [[SFStoreCursor alloc] initWithStore:nil querySpec:querySpec totalEntries:totalEntries firstPageEntries:nil];
+    STAssertEquals([cursor.totalEntries unsignedIntValue], totalEntries, @"Wrong value for totalEntries");
     int cursorTotalPages = [cursor.totalPages intValue];
     STAssertEquals(cursorTotalPages, expectedPageSize, @"%d entries across a page size of %d should make %d total pages.", totalEntries, evenDividePageSize, expectedPageSize);
 
     // Entries not evenly divided across the page size.
     uint unevenDividePageSize = 24;
     expectedPageSize = totalEntries / unevenDividePageSize + 1;
-    allQuery = [NSDictionary dictionaryWithObjectsAndKeys:kQuerySpecTypeRange, kQuerySpecParamQueryType,
-                              @"a/path", kQuerySpecParamIndexPath,
-                              [NSNumber numberWithInt:unevenDividePageSize], kQuerySpecParamPageSize,
-                              nil];
-    querySpec = [[SFQuerySpec alloc] initWithDictionary:allQuery  withSoupName:@"test"];
-    cursor = [[SFStoreCursor alloc] initWithStore:nil querySpec:querySpec totalEntries:totalEntries];
+    allQuery = @{kQuerySpecParamQueryType: kQuerySpecTypeRange,
+                              kQuerySpecParamIndexPath: @"a",
+                              kQuerySpecParamPageSize: [NSNumber numberWithInt:unevenDividePageSize]};
+    querySpec = [[SFQuerySpec alloc] initWithDictionary:allQuery  withSoupName:kTestSoupName];
+    cursor = [[SFStoreCursor alloc] initWithStore:nil querySpec:querySpec totalEntries:totalEntries firstPageEntries:nil];
+    STAssertEquals([cursor.totalEntries unsignedIntValue], totalEntries, @"Wrong value for totalEntries");
     cursorTotalPages = [cursor.totalPages intValue];
     STAssertEquals(cursorTotalPages, expectedPageSize, @"%d entries across a page size of %d should make %d total pages.", totalEntries, unevenDividePageSize, expectedPageSize);
 }
@@ -354,8 +360,8 @@ NSString * const kTestSoupName   = @"testSoup";
     [SFSmartStore removeSharedStoreWithName:kTestSmartStoreName];
     NSArray *noStoresArray = [[SFSmartStoreDatabaseManager sharedManager] allStoreNames];
     if (noStoresArray != nil) {
-        int expectedCount = [noStoresArray count];
-        STAssertEquals(expectedCount, 0, @"There should not be any stores defined.  Count = %d", expectedCount);
+        NSUInteger expectedCount = [noStoresArray count];
+        STAssertEquals(expectedCount, (NSUInteger)0, @"There should not be any stores defined.  Count = %lu", expectedCount);
     }
     
     // Create some stores.  Verify them.
@@ -382,58 +388,61 @@ NSString * const kTestSoupName   = @"testSoup";
 
 - (void)testEncryptionForSFSmartStore
 {
-    for (NSString *passcodeProviderName in [NSArray arrayWithObjects:kSFPasscodeProviderSHA256, kSFPasscodeProviderPBKDF2, nil]) {
-        NSLog(@"---Testing encryption using passcode provider '%@'.---", passcodeProviderName);
+    for (NSString *passcodeProviderName in @[kSFPasscodeProviderSHA256, kSFPasscodeProviderPBKDF2]) {
+        [self log:SFLogLevelDebug format:@"---Testing encryption using passcode provider '%@'.---", passcodeProviderName];
         [SFPasscodeProviderManager setCurrentPasscodeProviderByName:passcodeProviderName];
         
-        // Make sure SFSmartStore does default key encryption, if no passcode.
-        [[SFPasscodeManager sharedManager] resetPasscode];
+        [[SFPasscodeManager sharedManager] changePasscode:nil];
+        NSString *noPasscodeKey = [SFSmartStore encKey];
+        STAssertTrue([noPasscodeKey length] > 0, @"Even without passcode, SmartStore should have an encryption key.");
         NSString *newNoPasscodeStoreName = @"new_no_passcode_store";
         STAssertFalse([[SFSmartStoreDatabaseManager sharedManager] persistentStoreExists:newNoPasscodeStoreName], @"For provider '%@': Store '%@' should not currently exist.", passcodeProviderName, newNoPasscodeStoreName);
         SFSmartStore *newNoPasscodeStore = [SFSmartStore sharedStoreWithName:newNoPasscodeStoreName];
-        BOOL canReadSmartStoreDb = [self canReadDatabase:newNoPasscodeStore.storeDb];
+        BOOL canReadSmartStoreDb = [self canReadDatabaseQueue:newNoPasscodeStore.storeQueue];
         STAssertTrue(canReadSmartStoreDb, @"For provider '%@': Can't read DB created by SFSmartStore.", passcodeProviderName);
-        [newNoPasscodeStore.storeDb close];
+        [newNoPasscodeStore.storeQueue close];
         FMDatabase *rawDb = [self openDatabase:newNoPasscodeStoreName key:@"" openShouldFail:NO];
         canReadSmartStoreDb = [self canReadDatabase:rawDb];
         STAssertFalse(canReadSmartStoreDb, @"For provider '%@': Shouldn't be able to read store with no key.", passcodeProviderName);
         [rawDb close];
-        rawDb = [self openDatabase:newNoPasscodeStoreName key:[SFSmartStore defaultKey] openShouldFail:NO];
+        rawDb = [self openDatabase:newNoPasscodeStoreName key:noPasscodeKey openShouldFail:NO];
         canReadSmartStoreDb = [self canReadDatabase:rawDb];
-        STAssertTrue(canReadSmartStoreDb, @"For provider '%@': Should be able to read DB with default key.", passcodeProviderName);
+        STAssertTrue(canReadSmartStoreDb, @"For provider '%@': Should be able to read DB with SmartStore key.", passcodeProviderName);
         [rawDb close];
         
         // Make sure SFSmartStore encrypts a new store with a passcode, if a passcode exists.
         NSString *newPasscodeStoreName = @"new_passcode_store";
         NSString *passcode = @"blah";
-        [[SFPasscodeManager sharedManager] setPasscode:passcode];
+        [[SFPasscodeManager sharedManager] changePasscode:passcode];
+        NSString *passcodeKey = [SFSmartStore encKey];
+        STAssertTrue([passcodeKey isEqualToString:noPasscodeKey], @"Passcode change shouldn't impact encryption key value.");
         STAssertFalse([[SFSmartStoreDatabaseManager sharedManager] persistentStoreExists:newPasscodeStoreName], @"For provider '%@': Store '%@' should not currently exist.", passcodeProviderName, newPasscodeStoreName);
         SFSmartStore *newPasscodeStore = [SFSmartStore sharedStoreWithName:newPasscodeStoreName];
-        canReadSmartStoreDb = [self canReadDatabase:newPasscodeStore.storeDb];
+        canReadSmartStoreDb = [self canReadDatabaseQueue:newPasscodeStore.storeQueue];
         STAssertTrue(canReadSmartStoreDb, @"For provider '%@': Can't read DB created by SFSmartStore.", passcodeProviderName);
-        [newPasscodeStore.storeDb close];
+        [newPasscodeStore.storeQueue close];
         rawDb = [self openDatabase:newPasscodeStoreName key:@"" openShouldFail:NO];
         canReadSmartStoreDb = [self canReadDatabase:rawDb];
         STAssertFalse(canReadSmartStoreDb, @"For provider '%@': Shouldn't be able to read store with no key.", passcodeProviderName);
         [rawDb close];
-        rawDb = [self openDatabase:newPasscodeStoreName key:[SFSmartStore encKey] openShouldFail:NO];
+        rawDb = [self openDatabase:newPasscodeStoreName key:passcodeKey openShouldFail:NO];
         canReadSmartStoreDb = [self canReadDatabase:rawDb];
         STAssertTrue(canReadSmartStoreDb, @"For provider '%@': Should be able to read DB with passcode key.", passcodeProviderName);
         [rawDb close];
         
         // Make sure existing stores have the expected keys associated with them, between launches.
         [SFSmartStore clearSharedStoreMemoryState];
-        [[SFPasscodeManager sharedManager] setEncryptionKey:nil];
-        SFSmartStore *existingDefaultKeyStore = [SFSmartStore sharedStoreWithName:newNoPasscodeStoreName];
-        canReadSmartStoreDb = [self canReadDatabase:existingDefaultKeyStore.storeDb];
+        [[SFPasscodeManager sharedManager] changePasscode:nil];
+        SFSmartStore *existingNoPasscodeStore = [SFSmartStore sharedStoreWithName:newNoPasscodeStoreName];
+        canReadSmartStoreDb = [self canReadDatabaseQueue:existingNoPasscodeStore.storeQueue];
         STAssertTrue(canReadSmartStoreDb, @"For provider '%@': Should be able to read existing store with default key.", passcodeProviderName);
-        [[SFPasscodeManager sharedManager] setPasscode:passcode];
+        [[SFPasscodeManager sharedManager] changePasscode:passcode];
         SFSmartStore *existingPasscodeStore = [SFSmartStore sharedStoreWithName:newPasscodeStoreName];
-        canReadSmartStoreDb = [self canReadDatabase:existingPasscodeStore.storeDb];
+        canReadSmartStoreDb = [self canReadDatabaseQueue:existingPasscodeStore.storeQueue];
         STAssertTrue(canReadSmartStoreDb, @"For provider '%@': Should be able to read existing store with passcode key.", passcodeProviderName);
         
         // Cleanup.
-        [[SFPasscodeManager sharedManager] resetPasscode];
+        [[SFPasscodeManager sharedManager] changePasscode:nil];
         [SFSmartStore removeSharedStoreWithName:newNoPasscodeStoreName];
         [SFSmartStore removeSharedStoreWithName:newPasscodeStoreName];
         STAssertFalse([[SFSmartStoreDatabaseManager sharedManager] persistentStoreExists:newNoPasscodeStoreName], @"For provider '%@': Store '%@' should no longer exist.", passcodeProviderName, newNoPasscodeStoreName);
@@ -443,10 +452,7 @@ NSString * const kTestSoupName   = @"testSoup";
 
 - (void)testPasscodeChange
 {
-    // Clear the store state.
-    [self clearAllStores];
-    
-    NSArray *internalPasscodeProviders = [NSArray arrayWithObjects:kSFPasscodeProviderSHA256, kSFPasscodeProviderPBKDF2, nil];
+    NSArray *internalPasscodeProviders = @[kSFPasscodeProviderSHA256, kSFPasscodeProviderPBKDF2];
     
     // This loop changes the 'preferred' provider, to create test scenarios for jumping between one passcode provider
     // and another.  See [SFPasscodeManager setPasscode:].
@@ -460,116 +466,197 @@ NSString * const kTestSoupName   = @"testSoup";
             // First, no passcode -> passcode.
             [SFSecurityLockout setLockoutTimeInternal:600];
             NSString *newPasscode = @"blah";
-            NSArray *storeNames = [self variedStores:@""];
-            [SFSecurityLockout setPasscode:newPasscode];
-            NSString *encryptionKey = [SFPasscodeManager sharedManager].encryptionKey;
-            for (NSString *storeName in storeNames) {
-                FMDatabase *db = [self openDatabase:storeName key:encryptionKey openShouldFail:NO];
-                BOOL canReadDb = [self canReadDatabase:db];
-                STAssertTrue(canReadDb, @"Preferred provider: '%@', Current provider: '%@' -- Cannot read DB of store with store name '%@'", preferredPasscodeProviderName, currentPasscodeProviderName, storeName);
-                [db close];
-                SFSmartStore *store = [SFSmartStore sharedStoreWithName:storeName];
-                canReadDb = [self canReadDatabase:store.storeDb];
-                STAssertTrue(canReadDb, @"Preferred provider: '%@', Current provider: '%@' -- Cannot read DB of store with store name '%@'", preferredPasscodeProviderName, currentPasscodeProviderName, storeName);
-                BOOL usesDefault = [SFSmartStore usesDefaultKey:storeName];
-                STAssertFalse(usesDefault, @"Preferred provider: '%@', Current provider: '%@' -- None of the smart store instances should be configured with the default passcode.", preferredPasscodeProviderName, currentPasscodeProviderName);
-            }
+            [[SFPasscodeManager sharedManager] changePasscode:newPasscode];
+            NSString *encryptionKey = [SFSmartStore encKey];
+            FMDatabase *db = [self openDatabase:kTestSmartStoreName key:encryptionKey openShouldFail:NO];
+            BOOL canReadDb = [self canReadDatabase:db];
+            STAssertTrue(canReadDb, @"Preferred provider: '%@', Current provider: '%@' -- Cannot read DB of store with store name '%@'", preferredPasscodeProviderName, currentPasscodeProviderName, kTestSmartStoreName);
+            [db close];
+            SFSmartStore *store = [SFSmartStore sharedStoreWithName:kTestSmartStoreName];
+            canReadDb = [self canReadDatabaseQueue:store.storeQueue];
+            STAssertTrue(canReadDb, @"Preferred provider: '%@', Current provider: '%@' -- Cannot read DB of store with store name '%@'", preferredPasscodeProviderName, currentPasscodeProviderName, kTestSmartStoreName);
+            BOOL usesDefault = [SFSmartStoreUpgrade usesLegacyDefaultKey:kTestSmartStoreName];
+            STAssertFalse(usesDefault, @"Preferred provider: '%@', Current provider: '%@' -- The store should not be configured with the default passcode.", preferredPasscodeProviderName, currentPasscodeProviderName);
             
             // Passcode to no passcode.
-            newPasscode = [SFSmartStore defaultKey];
-            [SFSecurityLockout setPasscode:@""];
-            for (NSString *storeName in storeNames) {
-                FMDatabase *db = [self openDatabase:storeName key:newPasscode openShouldFail:NO];
-                BOOL canReadDb = [self canReadDatabase:db];
-                STAssertTrue(canReadDb, @"Preferred provider: '%@', Current provider: '%@' -- Cannot read DB of store with store name '%@'", preferredPasscodeProviderName, currentPasscodeProviderName, storeName);
-                [db close];
-                SFSmartStore *store = [SFSmartStore sharedStoreWithName:storeName];
-                canReadDb = [self canReadDatabase:store.storeDb];
-                STAssertTrue(canReadDb, @"Preferred provider: '%@', Current provider: '%@' -- Cannot read DB of store with store name '%@'", preferredPasscodeProviderName, currentPasscodeProviderName, storeName);
-                BOOL usesDefault = [SFSmartStore usesDefaultKey:storeName];
-                STAssertTrue(usesDefault, @"Preferred provider: '%@', Current provider: '%@' -- All of the smart store instances should be configured with the default passcode.", preferredPasscodeProviderName, currentPasscodeProviderName);
-            }
+            [[SFPasscodeManager sharedManager] changePasscode:@""];
+            db = [self openDatabase:kTestSmartStoreName key:encryptionKey openShouldFail:NO];
+            canReadDb = [self canReadDatabase:db];
+            STAssertTrue(canReadDb, @"Preferred provider: '%@', Current provider: '%@' -- Cannot read DB of store with store name '%@'", preferredPasscodeProviderName, currentPasscodeProviderName, kTestSmartStoreName);
+            [db close];
+            store = [SFSmartStore sharedStoreWithName:kTestSmartStoreName];
+            canReadDb = [self canReadDatabaseQueue:store.storeQueue];
+            STAssertTrue(canReadDb, @"Preferred provider: '%@', Current provider: '%@' -- Cannot read DB of store with store name '%@'", preferredPasscodeProviderName, currentPasscodeProviderName, kTestSmartStoreName);
+            usesDefault = [SFSmartStoreUpgrade usesLegacyDefaultKey:kTestSmartStoreName];
+            STAssertFalse(usesDefault, @"Preferred provider: '%@', Current provider: '%@' -- The store should not be configured with the default passcode.", preferredPasscodeProviderName, currentPasscodeProviderName);
             
-            [self clearAllStores];
             [SFSecurityLockout setLockoutTimeInternal:0];
-            [[SFPasscodeManager sharedManager] resetPasscode];
         }
     }
 }
 
-- (void)testDefaultEncryptionUpdate
+- (void)testEncryptionUpdate
 {
-    // Verify that the default encryption is idForVendor, for a new store.
-    FMDatabase *defaultKeyDb = [self openDatabase:kTestSmartStoreName key:[SFSmartStore defaultKeyBaseAppId] openShouldFail:NO];
-    BOOL canReadDb = [self canReadDatabase:defaultKeyDb];
-    STAssertTrue(canReadDb, @"Should be able to read default-encrypted database.");
+    NSString *encKey = [SFSmartStore encKey];
     
-    //
-    // Reset to the MAC address encryption, verify that it's updated successfully.
-    //
+    // Set up different database encryptions, verify that encryption upgrade updates all of them.  NB: "Default"
+    // store already exists.
+    NSString *unencryptedStoreName = @"unencryptedStore";
+    NSString *macStoreName = @"macStore";
+    NSString *vendorIdStoreName = @"vendorIdStore";
+    NSString *baseAppIdStoreName = @"baseAppIdStore";
+    NSArray *goodKeyStoreNames = @[ kTestSmartStoreName,
+                             unencryptedStoreName,
+                             macStoreName,
+                             vendorIdStoreName,
+                             baseAppIdStoreName
+                             ];
+    NSString *badKeyStoreName = @"badKeyStore";
+    NSArray *initialStoreInstances = @[ [SFSmartStore sharedStoreWithName:kTestSmartStoreName],
+                                        [SFSmartStore sharedStoreWithName:unencryptedStoreName],
+                                        [SFSmartStore sharedStoreWithName:macStoreName],
+                                        [SFSmartStore sharedStoreWithName:vendorIdStoreName],
+                                        [SFSmartStore sharedStoreWithName:baseAppIdStoreName],
+                                        [SFSmartStore sharedStoreWithName:badKeyStoreName]
+                                        ];
     
-    BOOL rekeyResult = [defaultKeyDb rekey:[SFSmartStore defaultKeyMac]];
+    // Clear all in-memory state and DB handles prior to upgrade.  It's the state SmartStore will be in when the
+    // upgrade runs.
+    for (SFSmartStore *store in initialStoreInstances) {
+        [store.storeQueue close];
+    }
+    [SFSmartStore clearSharedStoreMemoryState];
+    
+    // Unencrypted store
+    FMDatabase *storeDb = [self openDatabase:unencryptedStoreName key:encKey openShouldFail:NO];
+    NSError *unencryptStoreError = nil;
+    storeDb = [[SFSmartStoreDatabaseManager sharedManager] unencryptDb:storeDb name:unencryptedStoreName oldKey:encKey error:&unencryptStoreError];
+    STAssertNotNil(storeDb, @"Failed to unencrypt '%@': %@", unencryptedStoreName, [unencryptStoreError localizedDescription]);
+    [storeDb close];
+    [SFSmartStoreUpgrade setUsesKeyStoreEncryption:NO forUser:[SFUserAccountManager sharedInstance].currentUser store:unencryptedStoreName];
+    [SFSmartStoreUpgrade setUsesLegacyDefaultKey:NO forStore:unencryptedStoreName];
+    
+    // MAC store
+    storeDb = [self openDatabase:macStoreName key:encKey openShouldFail:NO];
+    BOOL rekeyResult = [storeDb rekey:[SFSmartStoreUpgrade legacyDefaultKeyMac]];
     STAssertTrue(rekeyResult, @"Re-encryption to MAC address should have been successful.");
-    [SFSmartStore setDefaultEncryptionType:SFSmartStoreDefaultEncryptionTypeMac forStore:kTestSmartStoreName];
-    [defaultKeyDb close];
-    defaultKeyDb = [self openDatabase:kTestSmartStoreName key:[SFSmartStore defaultKeyBaseAppId] openShouldFail:NO];
-    canReadDb = [self canReadDatabase:defaultKeyDb];
-    STAssertFalse(canReadDb, @"Should not be able to read default-encrypted database after re-encryption to MAC address.");
-    [defaultKeyDb close];
+    [storeDb close];
+    [SFSmartStoreUpgrade setUsesKeyStoreEncryption:NO forUser:[SFUserAccountManager sharedInstance].currentUser store:macStoreName];
+    [SFSmartStoreUpgrade setUsesLegacyDefaultKey:YES forStore:macStoreName];
+    [SFSmartStoreUpgrade setLegacyDefaultEncryptionType:SFSmartStoreDefaultEncryptionTypeMac forStore:macStoreName];
     
-    [SFSmartStore updateDefaultEncryption];
-    defaultKeyDb = [self openDatabase:kTestSmartStoreName key:[SFSmartStore defaultKeyBaseAppId] openShouldFail:NO];
-    canReadDb = [self canReadDatabase:defaultKeyDb];
-    STAssertTrue(canReadDb, @"Should be able to read default-encrypted database again.");
+    // Vendor ID store
+    storeDb = [self openDatabase:vendorIdStoreName key:encKey openShouldFail:NO];
+    rekeyResult = [storeDb rekey:[SFSmartStoreUpgrade legacyDefaultKeyIdForVendor]];
+    STAssertTrue(rekeyResult, @"Re-encryption to Vendor ID should have been successful.");
+    [storeDb close];
+    [SFSmartStoreUpgrade setUsesKeyStoreEncryption:NO forUser:[SFUserAccountManager sharedInstance].currentUser store:vendorIdStoreName];
+    [SFSmartStoreUpgrade setUsesLegacyDefaultKey:YES forStore:vendorIdStoreName];
+    [SFSmartStoreUpgrade setLegacyDefaultEncryptionType:SFSmartStoreDefaultEncryptionTypeIdForVendor forStore:vendorIdStoreName];
     
-    //
-    // Reset to the vendorId encryption, verify that it's updated successfully.
-    //
+    // Base App ID store
+    storeDb = [self openDatabase:baseAppIdStoreName key:encKey openShouldFail:NO];
+    rekeyResult = [storeDb rekey:[SFSmartStoreUpgrade legacyDefaultKeyBaseAppId]];
+    STAssertTrue(rekeyResult, @"Re-encryption to Base App ID should have been successful.");
+    [storeDb close];
+    [SFSmartStoreUpgrade setUsesKeyStoreEncryption:NO forUser:[SFUserAccountManager sharedInstance].currentUser store:baseAppIdStoreName];
+    [SFSmartStoreUpgrade setUsesLegacyDefaultKey:YES forStore:baseAppIdStoreName];
+    [SFSmartStoreUpgrade setLegacyDefaultEncryptionType:SFSmartStoreDefaultEncryptionTypeBaseAppId forStore:baseAppIdStoreName];
     
-    rekeyResult = [defaultKeyDb rekey:[SFSmartStore defaultKeyIdForVendor]];
-    STAssertTrue(rekeyResult, @"Re-encryption to idForVendor should have been successful.");
-    [SFSmartStore setDefaultEncryptionType:SFSmartStoreDefaultEncryptionTypeIdForVendor forStore:kTestSmartStoreName];
-    [defaultKeyDb close];
-    defaultKeyDb = [self openDatabase:kTestSmartStoreName key:[SFSmartStore defaultKeyBaseAppId] openShouldFail:NO];
-    canReadDb = [self canReadDatabase:defaultKeyDb];
-    STAssertFalse(canReadDb, @"Should not be able to read default-encrypted database after re-encryption to idForVendor.");
-    [defaultKeyDb close];
+    // Bad key store
+    storeDb = [self openDatabase:badKeyStoreName key:encKey openShouldFail:NO];
+    rekeyResult = [storeDb rekey:@"SomeUnrecognizedKey"];
+    STAssertTrue(rekeyResult, @"Re-encryption to bad key should have been successful.");
+    [storeDb close];
+    [SFSmartStoreUpgrade setUsesKeyStoreEncryption:NO forUser:[SFUserAccountManager sharedInstance].currentUser store:badKeyStoreName];
+    [SFSmartStoreUpgrade setUsesLegacyDefaultKey:YES forStore:badKeyStoreName]; // Random configuration.
+    [SFSmartStoreUpgrade setLegacyDefaultEncryptionType:SFSmartStoreDefaultEncryptionTypeBaseAppId forStore:badKeyStoreName];
     
-    [SFSmartStore updateDefaultEncryption];
-    defaultKeyDb = [self openDatabase:kTestSmartStoreName key:[SFSmartStore defaultKeyBaseAppId] openShouldFail:NO];
-    canReadDb = [self canReadDatabase:defaultKeyDb];
-    STAssertTrue(canReadDb, @"Should be able to read default-encrypted database again.");
-    [defaultKeyDb close];
+    // Update encryption
+    [SFSmartStoreUpgrade updateEncryption];
     
-    //
-    // Bad default key should remove un-decryptable store on update (iOS7 use case).
-    //
+    // Verify that all good key store DBs are now accessible through the same store encryption.
+    for (NSString *storeName in goodKeyStoreNames) {
+        storeDb = [self openDatabase:storeName key:encKey openShouldFail:NO];
+        BOOL canReadDb = [self canReadDatabase:storeDb];
+        STAssertTrue(canReadDb, @"Should be able to read encrypted database on encryption upgrade for store '%@'.", storeName);
+    }
     
-    NSString *badDefaultSeed = @"2F:00:00:00:00:00";
-    defaultKeyDb = [self openDatabase:kTestSmartStoreName key:[SFSmartStore defaultKeyBaseAppId] openShouldFail:NO];
-    canReadDb = [self canReadDatabase:defaultKeyDb];
-    STAssertTrue(canReadDb, @"Should be able to read default-encrypted database.");
-    rekeyResult = [defaultKeyDb rekey:[SFSmartStore defaultKeyWithSeed:badDefaultSeed]];
-    STAssertTrue(rekeyResult, @"Re-encryption should have been successful.");
-    [SFSmartStore setDefaultEncryptionType:SFSmartStoreDefaultEncryptionTypeMac forStore:kTestSmartStoreName];
-    [defaultKeyDb close];
+    // Verify that a bad key store will be removed as part of the upgrade process.
+    BOOL storeExists = [[SFSmartStoreDatabaseManager sharedManager] persistentStoreExists:badKeyStoreName];
+    STAssertFalse(storeExists, @"Un-decryptable store should have been removed on encryption update.");
     
-    [SFSmartStore updateDefaultEncryption];
-    BOOL storeExists = [SFSmartStore persistentStoreExists:kTestSmartStoreName];
-    STAssertFalse(storeExists, @"Un-decryptable store should have been removed on default encryption update.");
+    [self clearAllStores];
+}
+
+- (void) testGetDatabaseSize
+{
+    // Before
+    long initialSize = [_store getDatabaseSize];
+    
+    // Register
+    NSDictionary* soupIndex = @{@"path": @"name",@"type": @"string"};
+    [_store registerSoup:kTestSoupName withIndexSpecs:[SFSoupIndex asArraySoupIndexes:@[soupIndex]]];
+    
+    // Upserts
+    NSMutableArray* entries = [NSMutableArray array];
+    for (int i=0; i<100; i++) {
+        NSMutableDictionary* soupElt = [NSMutableDictionary dictionary];
+        soupElt[@"name"] = [NSString stringWithFormat:@"name_%d", i];
+        soupElt[@"value"] = [NSString stringWithFormat:@"value_%d", i];
+        [entries addObject:soupElt];
+    }
+    [_store upsertEntries:entries toSoup:kTestSoupName];
+    
+    // After
+    STAssertTrue([_store getDatabaseSize] > initialSize, @"Database size should be larger");
+    
+}
+
+-(void) testAlterSoupResumeAfterRenameOldSoupTable
+{
+    [self tryAlterSoupInterruptResume:SFAlterSoupStepRenameOldSoupTable];
+}
+
+-(void) testAlterSoupResumeAfterDropOldIndexes
+{
+    [self tryAlterSoupInterruptResume:SFAlterSoupStepDropOldIndexes];
+}
+
+-(void) testAlterSoupResumeAfterRegisterSoupUsingTableName
+{
+    [self tryAlterSoupInterruptResume:SFAlterSoupStepRegisterSoupUsingTableName];
+}
+
+-(void) testAlterSoupResumeAfterCopyTable
+{
+    [self tryAlterSoupInterruptResume:SFAlterSoupStepCopyTable];
+}
+
+-(void) testAlterSoupResumeAfterReIndexSoup
+{
+    [self tryAlterSoupInterruptResume:SFAlterSoupStepReIndexSoup];
+}
+
+-(void) testAlterSoupResumeAfterDropOldTable
+{
+    [self tryAlterSoupInterruptResume:SFAlterSoupStepDropOldTable];
 }
 
 #pragma mark - helper methods
 
 - (BOOL) hasTable:(NSString*)tableName
 {
-    FMResultSet *frs = [_store.storeDb executeQuery:@"select count(1) from sqlite_master where type = ? and name = ?" withArgumentsInArray:[NSArray arrayWithObjects:@"table", tableName, nil]];
+    __block NSInteger result = NSNotFound;
 
-    int result = NSNotFound;
-    if ([frs next]) {        
-        result = [frs intForColumnIndex:0];
-    }
-    [frs close];
+    [_store.storeQueue inDatabase:^(FMDatabase* db) {
+        FMResultSet *frs = [db executeQuery:@"select count(1) from sqlite_master where type = ? and name = ?" withArgumentsInArray:@[@"table", tableName]];
+        
+        if ([frs next]) {
+            result = [frs intForColumnIndex:0];
+        }
+        [frs close];
+    }];
     
     return result == 1;
 }
@@ -588,7 +675,7 @@ NSString * const kTestSoupName   = @"testSoup";
     if (openShouldFail) {
         STAssertNil(db, @"Opening database should have failed.");
     } else {
-        STAssertNotNil(db, @"Opening database should have returned a non-nil DB object.  Error: %@", [openDbError localizedDescription]);
+        STAssertNotNil(db, @"Opening database with name '%@' should have returned a non-nil DB object.  Error: %@", dbName, [openDbError localizedDescription]);
     }
     
     return db;
@@ -604,7 +691,7 @@ NSString * const kTestSoupName   = @"testSoup";
 - (int)rowCountForTable:(NSString *)tableName db:(FMDatabase *)db
 {
     NSString *rowCountQuery = [NSString stringWithFormat:@"SELECT COUNT(*) FROM %@", tableName];
-    NSLog(@"rowCountQuery: %@", rowCountQuery);
+    [self log:SFLogLevelDebug format:@"rowCountQuery: %@", rowCountQuery];
     int rowCount = [db intForQuery:rowCountQuery];
     return rowCount;
 }
@@ -622,6 +709,25 @@ NSString * const kTestSoupName   = @"testSoup";
     return (rs != nil);
 }
 
+- (BOOL)canReadDatabaseQueue:(FMDatabaseQueue *)queue
+{
+    __block BOOL readable = NO;
+    
+    [queue inDatabase:^(FMDatabase* db) {
+        // Turn off hard errors from FMDB first.
+        BOOL origCrashOnErrors = [db crashOnErrors];
+        [db setCrashOnErrors:NO];
+        
+        NSString *querySql = @"SELECT * FROM sqlite_master LIMIT 1";
+        FMResultSet *rs = [db executeQuery:querySql];
+        [rs close];
+        [db setCrashOnErrors:origCrashOnErrors];
+        readable = (rs != nil);
+    }];
+    
+    return readable;
+}
+
 - (BOOL)tableNameInMaster:(NSString *)tableName db:(FMDatabase *)db
 {
     // Turn off hard errors from FMDB first.
@@ -630,7 +736,7 @@ NSString * const kTestSoupName   = @"testSoup";
     
     BOOL result = YES;
     NSString *querySql = @"SELECT * FROM sqlite_master WHERE name = ?";
-    FMResultSet *rs = [db executeQuery:querySql withArgumentsInArray:[NSArray arrayWithObject:tableName]];
+    FMResultSet *rs = [db executeQuery:querySql withArgumentsInArray:@[tableName]];
     if (rs == nil || ![rs next]) {
         result = NO;
     }
@@ -640,48 +746,112 @@ NSString * const kTestSoupName   = @"testSoup";
     return result;
 }
 
-- (NSArray *)variedStores:(NSString *)passcode
-{
-    NSMutableArray *storeNames = [NSMutableArray array];
-    NSString *storeName;
-    NSString *tableName = @"My_Table";
-    
-    // Default smartstore.
-    storeName = @"store1";
-    SFSmartStore *ss = [SFSmartStore sharedStoreWithName:storeName];
-    STAssertNotNil(ss, @"Creating new SmartStore instance failed.");
-    [storeNames addObject:storeName];
-    
-    // Non-memory store with passcode (or no) as key.
-    storeName = @"store2";
-    [self createDbDir:storeName];
-    FMDatabase *db = [self openDatabase:storeName key:passcode openShouldFail:NO];
-    [self createTestTable:tableName db:db];
-    [db close];
-    [storeNames addObject:storeName];
-    
-    // If there's no passcode, non-memory store with default key.
-    if (passcode == nil || [passcode length] == 0) {
-        storeName = @"store3";
-        NSString *defKey = [SFSmartStore defaultKey];
-        [self createDbDir:storeName];
-        db = [self openDatabase:storeName key:defKey openShouldFail:NO];
-        [self createTestTable:tableName db:db];
-        [SFSmartStore setUsesDefaultKey:YES forStore:storeName];
-        [db close];
-        [storeNames addObject:storeName];
-    }
-    
-    return storeNames;
-}
-
 - (void)clearAllStores
 {
     _store = nil;
     [SFSmartStore removeAllStores];
     NSArray *allStoreNames = [[SFSmartStoreDatabaseManager sharedManager] allStoreNames];
-    int allStoreCount = [allStoreNames count];
-    STAssertEquals(allStoreCount, 0, @"Should not be any stores after removing them all.");
+    NSUInteger allStoreCount = [allStoreNames count];
+    STAssertEquals(allStoreCount, (NSUInteger)0, @"Should not be any stores after removing them all.");
+}
+
+- (void) tryAlterSoupInterruptResume:(SFAlterSoupStep)toStep
+{
+    // Before
+    STAssertFalse([_store soupExists:kTestSoupName], @"Soup %@ should not exist", kTestSoupName);
+    
+    // Register
+    NSDictionary* lastNameSoupIndex = @{@"path": @"lastName",@"type": @"string"};
+    NSArray* indexSpecs = [SFSoupIndex asArraySoupIndexes:@[lastNameSoupIndex]];
+    [_store registerSoup:kTestSoupName withIndexSpecs:indexSpecs];
+    BOOL testSoupExists = [_store soupExists:kTestSoupName];
+    STAssertTrue(testSoupExists, @"Soup %@ should exist", kTestSoupName);
+    __block NSString* soupTableName;
+    [_store.storeQueue inDatabase:^(FMDatabase *db) {
+        soupTableName = [_store tableNameForSoup:kTestSoupName withDb:db];
+    }];
+
+    // Populate soup
+    NSArray* entries = [SFJsonUtils objectFromJSONString:@"[{\"lastName\":\"Doe\", \"address\":{\"city\":\"San Francisco\",\"street\":\"1 market\"}},"
+                                                          "{\"lastName\":\"Jackson\", \"address\":{\"city\":\"Los Angeles\",\"street\":\"100 mission\"}}]"];
+    NSArray* insertedEntries  =[_store upsertEntries:entries toSoup:kTestSoupName];
+
+    // Partial alter - up to toStep included
+    NSDictionary* citySoupIndex = @{@"path": @"address.city",@"type": @"string"};
+    NSDictionary* streetSoupIndex = @{@"path": @"address.street",@"type": @"string"};
+    NSArray* indexSpecsNew = [SFSoupIndex asArraySoupIndexes:@[lastNameSoupIndex, citySoupIndex, streetSoupIndex]];
+    SFAlterSoupLongOperation* operation = [[SFAlterSoupLongOperation alloc] initWithStore:_store soupName:kTestSoupName newIndexSpecs:indexSpecsNew reIndexData:YES];
+    [operation runToStep:toStep];
+    
+    // Validate long_operations_status table
+    NSArray* operations = [_store getLongOperations];
+    NSInteger expectedCount = (toStep == kLastStep ? 0 : 1);
+    STAssertTrue([operations count] == expectedCount, @"Wrong number of long operations found");
+    if ([operations count] > 0) {
+        // Check details
+        SFAlterSoupLongOperation* actualOperation = (SFAlterSoupLongOperation*)operations[0];
+        STAssertEqualObjects(actualOperation.soupName, kTestSoupName, @"Wrong soup name");
+        STAssertEqualObjects(actualOperation.soupTableName, soupTableName, @"Wrong soup name");
+        STAssertTrue(actualOperation.reIndexData, @"Wrong re-index data");
+        
+        // Check last step completed
+        STAssertEquals(actualOperation.afterStep, toStep, @"Wrong step");
+        
+        // Simulate restart (clear cache and call resumeLongOperations)
+        // TODO clear memory cache
+        [_store resumeLongOperations];
+        
+        // Check that long operations table is now empty
+        STAssertTrue([[_store getLongOperations] count] == 0, @"There should be no long operations left");
+        
+        // Check index specs
+        NSArray* actualIndexSpecs = [_store indicesForSoup:kTestSoupName];
+        [self checkIndexSpecs:actualIndexSpecs withExpectedIndexSpecs:[SFSoupIndex asArraySoupIndexes:indexSpecsNew] checkColumnName:NO];
+     
+        // Check data
+        [_store.storeQueue inDatabase:^(FMDatabase *db) {
+            FMResultSet* frs = [_store queryTable:soupTableName forColumns:nil orderBy:@"id ASC" limit:nil whereClause:nil whereArgs:nil withDb:db];
+            [self checkRow:frs withExpectedEntry:insertedEntries[0] withSoupIndexes:actualIndexSpecs];
+            [self checkRow:frs withExpectedEntry:insertedEntries[1] withSoupIndexes:actualIndexSpecs];
+            STAssertFalse([frs next], @"Only two rows should have been returned");
+            [frs close];
+        }];
+    }
+}
+
+- (void) checkRow:(FMResultSet*) frs withExpectedEntry:(NSDictionary*)expectedEntry withSoupIndexes:(NSArray*)arraySoupIndexes
+{
+    STAssertTrue([frs next], @"Expected rows to be returned");
+    // Check id
+    STAssertEqualObjects(@([frs longForColumn:ID_COL]), expectedEntry[SOUP_ENTRY_ID], @"Wrong id");
+    
+    /*
+     // FIXME value coming back is an int - needs to be investigated and fixed in 2.2
+     STAssertEqualObjects([NSNumber numberWithLong:[frs longForColumn:LAST_MODIFIED_COL]], expectedEntry[SOUP_LAST_MODIFIED_DATE], @"Wrong last modified date");
+     */
+    
+    for (SFSoupIndex* soupIndex in arraySoupIndexes)
+    {
+        NSString* actualValue = [frs stringForColumn:soupIndex.columnName];
+        NSString* expectedValue = [SFJsonUtils projectIntoJson:expectedEntry path:soupIndex.path];
+        STAssertEqualObjects(actualValue, expectedValue, @"Wrong value in index column for %@", soupIndex.path);
+        
+    }
+    STAssertEqualObjects([frs stringForColumn:SOUP_COL], [SFJsonUtils JSONRepresentation:expectedEntry], @"Wrong value in soup column");
+}
+
+- (void) checkIndexSpecs:(NSArray*)actualSoupIndexes withExpectedIndexSpecs:(NSArray*)expectedSoupIndexes checkColumnName:(BOOL)checkColumnName
+{
+    STAssertTrue([actualSoupIndexes count] == [expectedSoupIndexes count], @"Wrong number of index specs");
+    for (int i = 0; i<[expectedSoupIndexes count]; i++) {
+        SFSoupIndex* actualSoupIndex = ((SFSoupIndex*)actualSoupIndexes[i]);
+        SFSoupIndex* expectedSoupIndex = ((SFSoupIndex*)expectedSoupIndexes[i]);
+        STAssertEqualObjects(actualSoupIndex.path, expectedSoupIndex.path, @"Wrong path");
+        STAssertEqualObjects(actualSoupIndex.indexType, expectedSoupIndex.indexType, @"Wrong type");
+        if (checkColumnName) {
+            STAssertEqualObjects(actualSoupIndex.columnName, expectedSoupIndex.columnName, @"Wrong column name");
+        }
+    }
 }
 
 @end

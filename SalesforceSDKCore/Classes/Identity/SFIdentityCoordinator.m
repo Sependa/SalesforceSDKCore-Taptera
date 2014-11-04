@@ -63,8 +63,6 @@ static NSString * const kSFIdentityDataPropertyKey           = @"com.salesforce.
 {
     self = [super init];
     if (self) {
-        NSAssert(credentials != nil && credentials.accessToken != nil, @"Must have an access token.");
-        NSAssert(credentials.identityUrl != nil, @"Must have a value for the identity URL.");
         self.credentials = credentials;
         self.timeout = kSFIdentityRequestDefaultTimeoutSeconds;
         self.retrievingData = NO;
@@ -78,9 +76,11 @@ static NSString * const kSFIdentityDataPropertyKey           = @"com.salesforce.
 
 - (void)initiateIdentityDataRetrieval
 {
+    NSAssert(self.credentials != nil && self.credentials.accessToken != nil, @"Must have an access token.");
+    NSAssert(self.credentials.identityUrl != nil, @"Must have a value for the identity URL.");
     NSAssert(self.delegate != nil, @"Cannot retrieve data without a delegate.");
     if (self.retrievingData) {
-        NSLog(@"Identity data retrieval already in progress.  Call cancelRetrieval to stop the transaction in progress.");
+        [self log:SFLogLevelDebug msg:@"Identity data retrieval already in progress.  Call cancelRetrieval to stop the transaction in progress."];
     }
     self.retrievingData = YES;
     
@@ -91,8 +91,7 @@ static NSString * const kSFIdentityDataPropertyKey           = @"com.salesforce.
     [request setValue:[NSString stringWithFormat:kHttpAuthHeaderFormatString, self.credentials.accessToken] forHTTPHeaderField:kHttpHeaderAuthorization];
 	[request setTimeoutInterval:self.timeout];
     [request setHTTPShouldHandleCookies:NO];
-    
-    NSLog(@"SFIdentityCoordinator:Starting identity request at %@", self.credentials.identityUrl.absoluteString);
+    [self log:SFLogLevelDebug format:@"SFIdentityCoordinator:Starting identity request at %@", self.credentials.identityUrl.absoluteString];
     NSURLConnection *urlConnection = [[NSURLConnection alloc] initWithRequest:request delegate:self];
     self.connection = urlConnection;
 }
@@ -172,16 +171,14 @@ static NSString * const kSFIdentityDataPropertyKey           = @"com.salesforce.
     
     NSString *localized = [NSString stringWithFormat:@"%@ %@ : %@", kSFIdentityErrorDomain, type, description];
     NSInteger intCode = kSFIdentityErrorUnknown;
-    NSNumber *numCode = [self.typeToCodeDict objectForKey:type];
+    NSNumber *numCode = (self.typeToCodeDict)[type];
     if (numCode != nil) {
         intCode = [numCode intValue];
     }
     
-    NSDictionary *dict = [NSDictionary dictionaryWithObjectsAndKeys:
-                          type,        kSFIdentityError,
-                          description, kSFIdentityErrorDescription,
-                          localized,   NSLocalizedDescriptionKey,
-                          nil];
+    NSDictionary *dict = @{kSFIdentityError: type,
+                          kSFIdentityErrorDescription: description,
+                          NSLocalizedDescriptionKey: localized};
     NSError *error = [NSError errorWithDomain:kSFIdentityErrorDomain code:intCode userInfo:dict];
     return error;
 }
@@ -192,11 +189,9 @@ static NSString * const kSFIdentityDataPropertyKey           = @"com.salesforce.
 {
     static NSDictionary *_typeToCodeDict = nil;
     if (_typeToCodeDict == nil) {
-        _typeToCodeDict = [[NSDictionary alloc] initWithObjectsAndKeys:
-                           [NSNumber numberWithInteger:kSFIdentityErrorNoData],        kSFIdentityErrorTypeNoData,
-                           [NSNumber numberWithInteger:kSFIdentityErrorDataMalformed], kSFIdentityErrorTypeDataMalformed,
-                           [NSNumber numberWithInteger:kSFIdentityErrorBadHttpResponse], kSFIdentityErrorTypeBadHttpResponse,
-                           nil];
+        _typeToCodeDict = @{kSFIdentityErrorTypeNoData: @(kSFIdentityErrorNoData),
+                           kSFIdentityErrorTypeDataMalformed: @(kSFIdentityErrorDataMalformed),
+                           kSFIdentityErrorTypeBadHttpResponse: @(kSFIdentityErrorBadHttpResponse)};
     }
     
     return _typeToCodeDict;
@@ -208,16 +203,16 @@ static NSString * const kSFIdentityDataPropertyKey           = @"com.salesforce.
 
 - (void)connection:(NSURLConnection *)connection didFailWithError:(NSError *)error
 {
-    NSLog(@"SFIdentityCoordinator:connection:didFailWithError: %@", error);
+    [self log:SFLogLevelDebug format:@"SFIdentityCoordinator:connection:didFailWithError: %@", error];
     [self notifyDelegateOfFailure:error];
 }
 
 - (void)connection:(NSURLConnection *)connection didReceiveResponse:(NSURLResponse *)response {
     // The connection can succeed, but the actual HTTP response is a failure.  Check for that.
-    int statusCode = [(NSHTTPURLResponse *)response statusCode];
+    NSInteger statusCode = [(NSHTTPURLResponse *)response statusCode];
     if (statusCode != 200) {
         self.httpError = [self errorWithType:kSFIdentityErrorTypeBadHttpResponse
-                                 description:[NSString stringWithFormat:@"Unexpected HTTP response code from the identity service: %d", statusCode]];
+                                 description:[NSString stringWithFormat:@"Unexpected HTTP response code from the identity service: %ld", (long)statusCode]];
     }
     
 	// reset the response data for a new refresh response
@@ -230,6 +225,10 @@ static NSString * const kSFIdentityDataPropertyKey           = @"com.salesforce.
 
 - (void)connectionDidFinishLoading:(NSURLConnection *)connection {
 	[self processResponse];
+}
+
+- (NSCachedURLResponse *)connection:(NSURLConnection *)connection willCacheResponse:(NSCachedURLResponse *)cachedResponse {
+    return nil;
 }
 
 @end

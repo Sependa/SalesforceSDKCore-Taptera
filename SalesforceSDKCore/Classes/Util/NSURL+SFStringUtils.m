@@ -43,7 +43,7 @@ NSString * const kSFRedactedQuerystringValue = @"[redacted]";
     // Loop through the querystring to evaluate the parameters.
     NSArray *queryNameValPairs = [[self query] componentsSeparatedByString:@"&"];
     for (int i = 0; i < [queryNameValPairs count]; i++) {
-        NSString *nameValPairString = [queryNameValPairs objectAtIndex:i];
+        NSString *nameValPairString = queryNameValPairs[i];
         NSArray *nameValPair = [nameValPairString componentsSeparatedByString:@"="];
         if (nameValPair == nil || [nameValPair count] != 2) {
             // If it's just a "hanging" parameter (e.g. &fromEmail as opposed to &fromEmail=1),
@@ -53,10 +53,10 @@ NSString * const kSFRedactedQuerystringValue = @"[redacted]";
         }
         
         // Got a good name/value pair.  See if any of the parameters to redact match this pair.
-        NSString *name = [nameValPair objectAtIndex:0];
+        NSString *name = nameValPair[0];
         NSString *redactedNameValuePairString = nil;
         for (int qspIndex = 0; qspIndex < [queryStringParamsToRedact count]; qspIndex++) {
-            NSString *paramToRedact = [queryStringParamsToRedact objectAtIndex:qspIndex];
+            NSString *paramToRedact = queryStringParamsToRedact[qspIndex];
             if ([[paramToRedact lowercaseString] isEqualToString:[name lowercaseString]]) {
                 // Got one!  Redact it.
                 redactedNameValuePairString = [NSString stringWithFormat:@"%@=%@", name, kSFRedactedQuerystringValue];
@@ -75,6 +75,42 @@ NSString * const kSFRedactedQuerystringValue = @"[redacted]";
     }
     
     return redactedUrl;
+}
+
++ (NSString*)stringUrlWithBaseUrl:(NSURL*)baseUrl pathComponents:(NSArray*)pathComponents {
+    NSMutableString *absoluteUrl = [[NSMutableString alloc] initWithString:[baseUrl absoluteString]];
+    [self appendPathComponents:pathComponents toMutableUrlString:absoluteUrl];
+    return absoluteUrl;
+}
+
++ (NSString*)stringUrlWithScheme:(NSString*)scheme host:(NSString*)host port:(NSNumber*)port pathComponents:(NSArray*)pathComponents {
+    NSMutableString *absoluteUrl = [[NSMutableString alloc] init];
+    [absoluteUrl appendFormat:@"%@://", scheme];
+    [absoluteUrl appendString:host];
+    if (port) {
+        [absoluteUrl appendFormat:@":%@", port];
+    }
+    
+    [self appendPathComponents:pathComponents toMutableUrlString:absoluteUrl];
+
+    return absoluteUrl;
+}
+
++ (void)appendPathComponents:(NSArray*)pathComponents toMutableUrlString:(NSMutableString*)urlString {
+    for (NSString *c in pathComponents) {
+        if ([c isEqualToString:@"/"]) {
+            continue;
+        }
+        
+        if (![c hasPrefix:@"/"] && ![urlString hasSuffix:@"/"]) {
+            [urlString appendString:@"/"];
+            [urlString appendString:c];
+        } else if ([c hasPrefix:@"/"] && [urlString hasSuffix:@"/"]) {
+            [urlString appendString:[c substringFromIndex:1]];
+        } else {
+            [urlString appendString:c];
+        }
+    }
 }
 
 @end
