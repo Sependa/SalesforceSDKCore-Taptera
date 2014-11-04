@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name = "SalesforceSDKCore-Taptera"
-  s.version = "1.0.1"
+  s.version = "2.3"
   s.summary = "Taptera version of Salesforce SDK Core for iOS."
   s.homepage = "https://github.com/Taptera/SalesforceSDKCore-Taptera"
   s.license      = {:type => 'custom', :file => 'LICENSE.md'}
@@ -14,7 +14,7 @@ Pod::Spec.new do |s|
   s.header_dir = 'SalesforceSDKCore'
 
   s.dependency 'Salesforce-Common-Utils-iOS-Taptera'
-  s.dependency 'SalesforceOAuth-Taptera'
+  s.dependency 'SalesforceOAuth-Taptera', '2.3'
   s.dependency 'FMDB'
 
   s.private_header_files = "External/openssl/openssl/*.h"

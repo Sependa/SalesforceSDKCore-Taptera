@@ -10,20 +10,31 @@ PODS:
   - FMDB/common (2.2)
   - FMDB/standard (2.2):
     - FMDB/common
+  - MKNetworkKit-Salesforce-Taptera (0.87.2):
+    - Reachability (~> 3.1.0)
+    - Salesforce-Common-Utils-iOS-Taptera
+  - Reachability (3.1.1)
   - Salesforce-Common-Utils-iOS-Taptera (1.0):
     - CocoaLumberjack (= 1.6.4)
-  - SalesforceOAuth-Taptera (1.0):
+  - SalesforceOAuth-Taptera (2.3):
     - Salesforce-Common-Utils-iOS-Taptera
+    - SalesforceSecurity-Taptera
+  - SalesforceSecurity-Taptera (2.3):
+    - MKNetworkKit-Salesforce-Taptera
+    - Salesforce-Common-Utils-iOS-Taptera (= 2.3)
 
 DEPENDENCIES:
   - FMDB
   - Salesforce-Common-Utils-iOS-Taptera
-  - SalesforceOAuth-Taptera
+  - SalesforceOAuth-Taptera (= 2.3)
 
 SPEC CHECKSUMS:
-  CocoaLumberjack: a41a6cce03be251319e1ace1fdac5a610ce10467
-  FMDB: 97472cfacf0d9e445e915704fb43b4b142799c36
+  CocoaLumberjack: e03e9ba0022d69a837016b471d0b702e94c7803e
+  FMDB: f6f4511ad1e9ace38e9b6f4d83c2cddaabf98ea6
+  MKNetworkKit-Salesforce-Taptera: 612b1c16824465c2351062c0fb3a736f09295775
+  Reachability: 8e9635e3cb4f98e7f825e51147f677ecc694d0e7
   Salesforce-Common-Utils-iOS-Taptera: 8cfb08f3e5a63864522c550423d97c338f766530
-  SalesforceOAuth-Taptera: b683cd451a2140eb979acfcc8d4185b0abc3ee93
+  SalesforceOAuth-Taptera: f7f0e2426e9ace7edbeef768e4fff015102c4629
+  SalesforceSecurity-Taptera: 5d6221858c66ec70f1bdd241f064b699270f7f36
 
-COCOAPODS: 0.28.0
+COCOAPODS: 0.34.2
