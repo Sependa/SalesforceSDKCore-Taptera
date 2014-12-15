@@ -1,9 +1,8 @@
 PODS:
-  - CocoaLumberjack (1.6.4):
-    - CocoaLumberjack/Core
+  - CocoaLumberjack (1.9.2):
     - CocoaLumberjack/Extensions
-  - CocoaLumberjack/Core (1.6.4)
-  - CocoaLumberjack/Extensions (1.6.4):
+  - CocoaLumberjack/Core (1.9.2)
+  - CocoaLumberjack/Extensions (1.9.2):
     - CocoaLumberjack/Core
   - FMDB (2.2):
     - FMDB/standard
@@ -14,27 +13,27 @@ PODS:
     - Reachability (~> 3.1.0)
     - Salesforce-Common-Utils-iOS-Taptera
   - Reachability (3.1.1)
-  - Salesforce-Common-Utils-iOS-Taptera (1.0):
-    - CocoaLumberjack (= 1.6.4)
-  - SalesforceOAuth-Taptera (2.3):
-    - Salesforce-Common-Utils-iOS-Taptera
-    - SalesforceSecurity-Taptera
-  - SalesforceSecurity-Taptera (2.3):
+  - Salesforce-Common-Utils-iOS-Taptera (2.3.1):
+    - CocoaLumberjack (= 1.9.2)
+  - SalesforceOAuth-Taptera (2.3.1):
+    - Salesforce-Common-Utils-iOS-Taptera (= 2.3.1)
+    - SalesforceSecurity-Taptera (= 2.3.1)
+  - SalesforceSecurity-Taptera (2.3.1):
     - MKNetworkKit-Salesforce-Taptera
-    - Salesforce-Common-Utils-iOS-Taptera (= 2.3)
+    - Salesforce-Common-Utils-iOS-Taptera (= 2.3.1)
 
 DEPENDENCIES:
   - FMDB
-  - Salesforce-Common-Utils-iOS-Taptera
-  - SalesforceOAuth-Taptera (= 2.3)
+  - Salesforce-Common-Utils-iOS-Taptera (= 2.3.1)
+  - SalesforceOAuth-Taptera (= 2.3.1)
 
 SPEC CHECKSUMS:
-  CocoaLumberjack: e03e9ba0022d69a837016b471d0b702e94c7803e
+  CocoaLumberjack: 205769c032b5fef85b92472046bcc8b7e7c8a817
   FMDB: f6f4511ad1e9ace38e9b6f4d83c2cddaabf98ea6
-  MKNetworkKit-Salesforce-Taptera: 612b1c16824465c2351062c0fb3a736f09295775
+  MKNetworkKit-Salesforce-Taptera: 493e25d82acf3e051cf8f384c13e715acd54725a
   Reachability: 8e9635e3cb4f98e7f825e51147f677ecc694d0e7
-  Salesforce-Common-Utils-iOS-Taptera: 8cfb08f3e5a63864522c550423d97c338f766530
-  SalesforceOAuth-Taptera: f7f0e2426e9ace7edbeef768e4fff015102c4629
-  SalesforceSecurity-Taptera: 5d6221858c66ec70f1bdd241f064b699270f7f36
+  Salesforce-Common-Utils-iOS-Taptera: 1b11fcfbd2c5d1b212690481501f155aef3963c2
+  SalesforceOAuth-Taptera: 08c33be14ee656d4b402e4ff8e5ad898907fc638
+  SalesforceSecurity-Taptera: 8d4dfe7201c3c023d5a57ff2d8f559f5502c2033
 
-COCOAPODS: 0.34.2
+COCOAPODS: 0.34.4
