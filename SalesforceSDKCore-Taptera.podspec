@@ -17,8 +17,6 @@ Pod::Spec.new do |s|
   s.dependency 'SalesforceOAuth-Taptera', '2.3.1'
   s.dependency 'FMDB'
 
-  s.private_header_files = "External/openssl/openssl/*.h"
-
   s.vendored_libraries = 'External/openssl/*.a', 'External/sqlcipher/libJavaScriptCore.a'
   s.prefix_header_file = 'SalesforceSDKCore/SalesforceSDKCore-Prefix.pch'
 
